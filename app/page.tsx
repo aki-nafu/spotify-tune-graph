@@ -1,7 +1,7 @@
-"use client"
+'use client'
 
-import { useState, useEffect } from 'react'
-import { Radar } from 'react-chartjs-2'
+import { useState } from 'react';
+import { Radar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   RadialLinearScale,
@@ -10,7 +10,7 @@ import {
   Filler,
   Tooltip,
   Legend,
-} from 'chart.js'
+} from 'chart.js';
 
 ChartJS.register(
   RadialLinearScale,
@@ -19,103 +19,78 @@ ChartJS.register(
   Filler,
   Tooltip,
   Legend
-)
+);
 
-// Spotify API関連の定数
-const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID
-const CLIENT_SECRET = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_SECRET
-const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token'
-const SEARCH_ENDPOINT = 'https://api.spotify.com/v1/search'
-const AUDIO_FEATURES_ENDPOINT = 'https://api.spotify.com/v1/audio-features'
+const PITCH_CLASS = ['C', 'C♯/D♭', 'D', 'D♯/E♭', 'E', 'F', 'F♯/G♭', 'G', 'G♯/A♭', 'A', 'A♯/B♭', 'B'];
 
-// Pitchクラス配列（Keyの変換に使用）
-const PITCH_CLASS = ['C', 'C♯/D♭', 'D', 'D♯/E♭', 'E', 'F', 'F♯/G♭', 'G', 'G♯/A♭', 'A', 'A♯/B♭', 'B']
-
-// アクセストークンを取得する関数
-async function getAccessToken() {
-  const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
-  const response = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basic}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-  })
-
-  const data = await response.json()
-  return data.access_token
-}
-
-// 曲を検索する関数
-async function searchTracks(query: string) {
-  const token = await getAccessToken()
-  const response = await fetch(`${SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}&type=track&limit=10`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  })
-
-  const data = await response.json()
-  return data.tracks.items
-}
-
-// 曲のオーディオ特徴を取得する関数
-async function getAudioFeatures(trackId: string) {
-  const token = await getAccessToken()
-  const response = await fetch(`${AUDIO_FEATURES_ENDPOINT}/${trackId}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  })
-
-  const data = await response.json()
-  return {
-    acousticness: data.acousticness,
-    danceability: data.danceability,
-    energy: data.energy,
-    instrumentalness: data.instrumentalness,
-    liveness: data.liveness,
-    speechiness: data.speechiness,
-    bpm: data.tempo,
-    key: `${PITCH_CLASS[data.key]} ${data.mode === 1 ? 'Major' : 'Minor'}`,
-  }
+interface AudioFeatures {
+  acousticness: number;
+  danceability: number;
+  energy: number;
+  instrumentalness: number;
+  liveness: number;
+  speechiness: number;
+  bpm: number;
+  key: string;
 }
 
 export default function SpotifyAnalyzer() {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [selectedTrack, setSelectedTrack] = useState(null)
-  const [audioFeatures, setAudioFeatures] = useState(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedTrack, setSelectedTrack] = useState<any | null>(null);
+  const [audioFeatures, setAudioFeatures] = useState<AudioFeatures | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSearch = async () => {
-    setIsLoading(true)
-    setError(null)
+    setIsLoading(true);
+    setError(null);
     try {
-      const results = await searchTracks(searchQuery)
-      setSearchResults(results)
+      const response = await fetch('/api/spotify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: searchQuery }),
+      });
+      const results = await response.json();
+      setSearchResults(results);
     } catch (err) {
-      setError('Failed to search tracks. Please try again.')
-      console.error(err)
+      setError('Failed to search tracks. Please try again.');
+      console.error(err);
     }
-    setIsLoading(false)
-  }
+    setIsLoading(false);
+  };
 
-  const handleTrackSelect = async (track) => {
-    setSelectedTrack(track)
-    setIsLoading(true)
-    setError(null)
+  const handleTrackSelect = async (track: any) => {
+    setSelectedTrack(track);
+    setIsLoading(true);
+    setError(null);
     try {
-      const features = await getAudioFeatures(track.id)
-      setAudioFeatures(features)
+      const response = await fetch('/api/spotify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ trackId: track.id }),
+      });
+      const features = await response.json();
+      setAudioFeatures({
+        acousticness: features.acousticness,
+        danceability: features.danceability,
+        energy: features.energy,
+        instrumentalness: features.instrumentalness,
+        liveness: features.liveness,
+        speechiness: features.speechiness,
+        bpm: features.tempo,
+        key: `${PITCH_CLASS[features.key]} ${features.mode === 1 ? 'Major' : 'Minor'}`,
+      });
     } catch (err) {
-      setError('Failed to get audio features. Please try again.')
-      console.error(err)
+      setError('Failed to get audio features. Please try again.');
+      console.error(err);
     }
-    setIsLoading(false)
-  }
+    setIsLoading(false);
+  };
 
   const chartData = {
     labels: ['Acousticness', 'Danceability', 'Energy', 'Instrumentalness', 'Liveness', 'Speechiness'],
@@ -135,8 +110,7 @@ export default function SpotifyAnalyzer() {
         borderWidth: 1,
       },
     ],
-  }
-
+  };
   return (
     <div className="min-h-screen bg-black text-white p-8">
       <div className="bg-[#121212] rounded-lg p-6 shadow-lg">
