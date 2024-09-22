@@ -1,107 +1,229 @@
-'use client'
+"use client"
 
 import { useState, useEffect } from 'react'
-import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts'
-import SpotifyWebApi from 'spotify-web-api-js'
+import { Radar } from 'react-chartjs-2'
+import {
+  Chart as ChartJS,
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+  Tooltip,
+  Legend,
+} from 'chart.js'
 
-const spotifyApi = new SpotifyWebApi()
+ChartJS.register(
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+  Tooltip,
+  Legend
+)
 
-const CLIENT_ID = '8c73acd8debd48349f454af6404fa5fe'
-const CLIENT_SECRET = 'c21c9541b43644bf8a2f62972d33484f'
+// Spotify API関連の定数
+const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID
+const CLIENT_SECRET = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_SECRET
+const TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token'
+const SEARCH_ENDPOINT = 'https://api.spotify.com/v1/search'
+const AUDIO_FEATURES_ENDPOINT = 'https://api.spotify.com/v1/audio-features'
 
-export default function SpotifyTrackAnalyzer() {
-  const [token, setToken] = useState('')
-  const [search, setSearch] = useState('')
-  const [tracks, setTracks] = useState([])
+// Pitchクラス配列（Keyの変換に使用）
+const PITCH_CLASS = ['C', 'C♯/D♭', 'D', 'D♯/E♭', 'E', 'F', 'F♯/G♭', 'G', 'G♯/A♭', 'A', 'A♯/B♭', 'B']
+
+// アクセストークンを取得する関数
+async function getAccessToken() {
+  const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
+  const response = await fetch(TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  })
+
+  const data = await response.json()
+  return data.access_token
+}
+
+// 曲を検索する関数
+async function searchTracks(query: string) {
+  const token = await getAccessToken()
+  const response = await fetch(`${SEARCH_ENDPOINT}?q=${encodeURIComponent(query)}&type=track&limit=10`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  const data = await response.json()
+  return data.tracks.items
+}
+
+// 曲のオーディオ特徴を取得する関数
+async function getAudioFeatures(trackId: string) {
+  const token = await getAccessToken()
+  const response = await fetch(`${AUDIO_FEATURES_ENDPOINT}/${trackId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  const data = await response.json()
+  return {
+    acousticness: data.acousticness,
+    danceability: data.danceability,
+    energy: data.energy,
+    instrumentalness: data.instrumentalness,
+    liveness: data.liveness,
+    speechiness: data.speechiness,
+    bpm: data.tempo,
+    key: `${PITCH_CLASS[data.key]} ${data.mode === 1 ? 'Major' : 'Minor'}`,
+  }
+}
+
+export default function SpotifyAnalyzer() {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
   const [selectedTrack, setSelectedTrack] = useState(null)
   const [audioFeatures, setAudioFeatures] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
 
-  useEffect(() => {
-    const getToken = async () => {
-      const result = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + btoa(CLIENT_ID + ':' + CLIENT_SECRET)
-        },
-        body: 'grant_type=client_credentials'
-      })
-
-      const data = await result.json()
-      setToken(data.access_token)
-      spotifyApi.setAccessToken(data.access_token)
+  const handleSearch = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const results = await searchTracks(searchQuery)
+      setSearchResults(results)
+    } catch (err) {
+      setError('Failed to search tracks. Please try again.')
+      console.error(err)
     }
-
-    getToken()
-  }, [])
-
-  const searchTracks = async () => {
-    const result = await spotifyApi.searchTracks(search)
-    setTracks(result.tracks.items)
+    setIsLoading(false)
   }
 
-  const analyzeTrack = async (track) => {
+  const handleTrackSelect = async (track) => {
     setSelectedTrack(track)
-    const features = await spotifyApi.getAudioFeaturesForTrack(track.id)
-    setAudioFeatures(features)
+    setIsLoading(true)
+    setError(null)
+    try {
+      const features = await getAudioFeatures(track.id)
+      setAudioFeatures(features)
+    } catch (err) {
+      setError('Failed to get audio features. Please try again.')
+      console.error(err)
+    }
+    setIsLoading(false)
   }
 
-  const chartData = audioFeatures ? [
-    { feature: 'Danceability', value: audioFeatures.danceability },
-    { feature: 'Energy', value: audioFeatures.energy },
-    { feature: 'Acousticness', value: audioFeatures.acousticness },
-    { feature: 'Instrumentalness', value: audioFeatures.instrumentalness },
-    { feature: 'Liveness', value: audioFeatures.liveness },
-    { feature: 'Valence', value: audioFeatures.valence }
-  ] : []
+  const chartData = {
+    labels: ['Acousticness', 'Danceability', 'Energy', 'Instrumentalness', 'Liveness', 'Speechiness'],
+    datasets: [
+      {
+        label: 'Audio Features',
+        data: audioFeatures ? [
+          audioFeatures.acousticness,
+          audioFeatures.danceability,
+          audioFeatures.energy,
+          audioFeatures.instrumentalness,
+          audioFeatures.liveness,
+          audioFeatures.speechiness
+        ] : [],
+        backgroundColor: 'rgba(29, 185, 84, 0.2)',
+        borderColor: 'rgb(29, 185, 84)',
+        borderWidth: 1,
+      },
+    ],
+  }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Spotify Track Analyzer</h1>
-        <div className="flex mb-6">
+    <div className="min-h-screen bg-black text-white p-8">
+      <div className="bg-[#121212] rounded-lg p-6 shadow-lg">
+        <h1 className="text-2xl font-bold mb-6">Spotify Track Analyzer</h1>
+        <div className="flex space-x-4 mb-6">
           <input
             type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search for a track"
-            className="flex-grow px-4 py-2 rounded-l-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-grow bg-[#282828] text-white border-none rounded-md p-2"
+            aria-label="Search for a track"
           />
-          <button
-            onClick={searchTracks}
-            className="px-6 py-2 bg-blue-500 text-white rounded-r-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          <button 
+            onClick={handleSearch} 
+            className="bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold py-2 px-4 rounded"
+            disabled={isLoading}
           >
-            Search
+            {isLoading ? 'Searching...' : 'Search'}
           </button>
         </div>
-        <div className="bg-white rounded-md shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4">Search Results</h2>
-          <ul className="space-y-2">
-            {tracks.map((track) => (
-              <li key={track.id}>
-                <button
-                  onClick={() => analyzeTrack(track)}
-                  className="text-blue-500 hover:underline"
+        {error && <p className="text-red-500 mb-4" role="alert">{error}</p>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-[#181818] rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-4">Search Results</h2>
+            <div className="h-[400px] overflow-y-auto">
+              {searchResults.map((track) => (
+                <div
+                  key={track.id}
+                  className="flex items-center space-x-4 p-2 hover:bg-[#282828] cursor-pointer"
+                  onClick={() => handleTrackSelect(track)}
                 >
-                  {track.name} - {track.artists[0].name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-        {selectedTrack && (
-          <div className="mt-8 bg-white rounded-md shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">{selectedTrack.name} - {selectedTrack.artists[0].name}</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart cx="50%" cy="50%" outerRadius="80%" data={chartData}>
-                <PolarGrid />
-                <PolarAngleAxis dataKey="feature" />
-                <PolarRadiusAxis angle={30} domain={[0, 1]} />
-                <Radar name="Audio Features" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
-              </RadarChart>
-            </ResponsiveContainer>
+                  <img src={track.album.images[2].url} alt={track.name} className="w-10 h-10" />
+                  <div>
+                    <p className="font-medium">{track.name}</p>
+                    <p className="text-sm text-gray-400">{track.artists[0].name}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        )}
+          <div className="bg-[#181818] rounded-lg p-4">
+            <h2 className="text-lg font-semibold mb-4">Audio Features</h2>
+            {isLoading ? (
+              <p className="text-center text-gray-400">Loading...</p>
+            ) : selectedTrack && audioFeatures ? (
+              <div>
+                <div className="mb-4 grid grid-cols-2 gap-4">
+                  <div className="bg-[#282828] p-3 rounded-md">
+                    <p className="text-sm text-gray-400">BPM</p>
+                    <p className="text-xl font-bold">{Math.round(audioFeatures.bpm)}</p>
+                  </div>
+                  <div className="bg-[#282828] p-3 rounded-md">
+                    <p className="text-sm text-gray-400">Key</p>
+                    <p className="text-xl font-bold">{audioFeatures.key}</p>
+                  </div>
+                </div>
+                <Radar data={chartData} options={{
+                  scales: {
+                    r: {
+                      angleLines: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                      },
+                      grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                      },
+                      pointLabels: {
+                        color: 'white'
+                      },
+                      ticks: {
+                        color: 'white',
+                        backdropColor: 'transparent'
+                      }
+                    }
+                  },
+                  plugins: {
+                    legend: {
+                      display: false
+                    }
+                  }
+                }} />
+              </div>
+            ) : (
+              <p className="text-center text-gray-400">Select a track to view its audio features</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
